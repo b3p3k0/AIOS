@@ -172,13 +172,20 @@ run_qemu() {
     fi
     prepare_ovmf_vars
 
+    local accel="tcg"
+    local cpu="qemu64"
+    if [[ -e /dev/kvm && -r /dev/kvm && -w /dev/kvm ]]; then
+        accel="kvm"
+        cpu="host"
+    fi
+
     log "Launching QEMU with OVMF"
     # TianoCore's OVMF firmware emulates a UEFI board so we can validate the
     # firmware->bootloader contract in QEMU before hardware trials. [OVMF —
     # https://github.com/tianocore/tianocore.github.io/wiki/OVMF]
     qemu-system-x86_64 \
-        -machine q35,accel=kvm:tcg \
-        -cpu host \
+        -machine q35,accel=$accel \
+        -cpu $cpu \
         -m 512 \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
         -drive if=pflash,format=raw,file="$OVMF_VARS" \

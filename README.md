@@ -7,7 +7,7 @@ AIOS walks readers from power-on to a toy 64-bit kernel with guardrail-quality d
 2. If `make`, `gnu-efi`, or `uuid-dev` aren’t installed yet (common on stock Ubuntu Desktop VMs), run `sudo apt-get update && sudo apt-get install -y make gnu-efi uuid-dev ovmf`.
 3. Run `make deps` once to install build, image, and virtualization tooling.
 4. Run `make image` to compile `bootloader/hello-efi` and stage `/EFI/BOOT/BOOTX64.EFI` inside `images/aios-efi.img`.
-5. Run `make run` to launch QEMU with the system disk plus OVMF firmware. You should see "Hello from AIOS – EFI test" in the firmware console; press any key to exit.
+5. Run `make run` to launch QEMU with the system disk plus OVMF firmware. You should see "Hello from AIOS – EFI test" in the firmware console; press any key to exit. On hosts without `/dev/kvm` (e.g., nested VirtualBox), the script auto-falls back to TCG and uses a generic `qemu64` CPU model.
 
 If `make run` complains about missing `OVMF_CODE.fd`, either install `ovmf` as above or point the script at your firmware path:
 ```bash
