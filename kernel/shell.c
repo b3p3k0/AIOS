@@ -9,8 +9,6 @@
 
 static void print(const char *s) { serial_write(s); }
 
-static void print_hex64(uint64_t v) { serial_write_hex(v); }
-
 static int read_line(char *out, size_t max) {
     size_t len = 0;
     while (len + 1 < max) {
