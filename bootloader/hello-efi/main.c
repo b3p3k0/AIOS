@@ -86,6 +86,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
     describe_boot_device(image_handle, &boot.boot_device);
 
     struct memory_map map = {0};
+    Print(L"[loader] Stage: capturing memory map and exiting boot services\r\n");
     while (TRUE) {
         status = prepare_memory_map(&map);
         if (EFI_ERROR(status)) {
@@ -99,22 +100,6 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
         boot.memory_map.descriptor_version = map.descriptor_version;
         summarize_memory(&map, &boot.memory_summary);
 
-        Print(L"[loader] Stage: memory map captured (%u bytes, %u descriptors)\r\n",
-              (UINT32)map.size, (UINT32)(map.size / map.descriptor_size));
-        Print(L"[loader] RAM usable total: %u KB, largest range: 0x%lx (%u KB)\r\n",
-              (UINT32)(boot.memory_summary.total_usable_bytes / 1024),
-              boot.memory_summary.largest_usable_base,
-              (UINT32)(boot.memory_summary.largest_usable_size / 1024));
-        Print(L"[loader] Framebuffer: %ux%u @ 0x%lx\r\n",
-              boot.framebuffer.width,
-              boot.framebuffer.height,
-              boot.framebuffer.base);
-        Print(L"[loader] RSDP: 0x%lx\r\n", boot.rsdp_address);
-        Print(L"[loader] Boot media: %u KB, block %u, %s\r\n",
-              (UINT32)(boot.boot_device.total_bytes / 1024),
-              boot.boot_device.block_size,
-              boot.boot_device.removable ? L"removable" : L"fixed");
-        Print(L"[loader] Stage: about to exit boot services\r\n");
         status = exit_boot_services_with_map(image_handle, &map);
         if (status == EFI_SUCCESS) {
             break;
@@ -127,9 +112,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
         /* Memory map changed between calls. Retry. */
     }
 
-    Print(L"[loader] Stage: boot services exited, jumping to kernel\r\n");
     boot.checksum = checksum_bootinfo(&boot);
-    Print(L"[loader] Handoff checksum: 0x%08x\r\n", boot.checksum);
+    /* Cannot use Print after ExitBootServices on all firmware reliably; we already logged before. */
     typedef void (*kernel_entry_t)(struct aios_boot_info *);
     kernel_entry_t entry = (kernel_entry_t)(UINTN)kernel.entry;
     entry(&boot);
