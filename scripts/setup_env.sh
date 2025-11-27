@@ -165,10 +165,19 @@ build_kernel() {
         -nostdlib
         -I"$PROJECT_ROOT/include"
         -I"$PROJECT_ROOT"
+        -I"$PROJECT_ROOT/kernel"
+        -I"$PROJECT_ROOT/kernel/fs"
     )
 
     local objs=()
-    for src in "$PROJECT_ROOT/kernel/main.c" "$PROJECT_ROOT/kernel/serial.c" "$PROJECT_ROOT/kernel/util.c"; do
+    for src in \
+        "$PROJECT_ROOT/kernel/main.c" \
+        "$PROJECT_ROOT/kernel/serial.c" \
+        "$PROJECT_ROOT/kernel/util.c" \
+        "$PROJECT_ROOT/kernel/mem.c" \
+        "$PROJECT_ROOT/kernel/fs/blockdev.c" \
+        "$PROJECT_ROOT/kernel/fs/fs.c" \
+        "$PROJECT_ROOT/kernel/shell.c"; do
         local obj="$KERNEL_BUILD_DIR/$(basename "${src%.*}").o"
         x86_64-linux-gnu-gcc "${cflags[@]}" -c "$src" -o "$obj"
         objs+=("$obj")

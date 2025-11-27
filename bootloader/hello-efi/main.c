@@ -6,6 +6,7 @@
 #include "aios/bootinfo.h"
 
 #define KERNEL_PATH L"\\AIOS\\KERNEL.ELF"
+#define FS_IMAGE_PATH L"\\AIOS\\FS.IMG"
 #define ALIGN_DOWN(value, align) ((value) & ~((align) - 1))
 #define ALIGN_UP(value, align)   (((value) + ((align) - 1)) & ~((align) - 1))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -28,6 +29,7 @@ struct memory_map {
 
 static EFI_STATUS open_root(EFI_HANDLE image_handle, EFI_FILE_PROTOCOL **root);
 static EFI_STATUS read_kernel_file(EFI_FILE_PROTOCOL *root, VOID **buffer, UINTN *size);
+static EFI_STATUS read_fs_image(EFI_FILE_PROTOCOL *root, EFI_PHYSICAL_ADDRESS *out_base, UINTN *out_size);
 static EFI_STATUS load_kernel_image(VOID *buffer, UINTN size, struct loaded_kernel *out);
 static EFI_STATUS prepare_memory_map(struct memory_map *map);
 static EFI_STATUS exit_boot_services_with_map(EFI_HANDLE image_handle, struct memory_map *map);
@@ -81,6 +83,19 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
     CopyMem(boot.accel_mode, ACCEL_MODE, MIN(sizeof boot.accel_mode - 1, (UINTN)4));
 #endif
     Print(L"[loader] Accel: %a\r\n", boot.accel_mode[0] ? boot.accel_mode : "unknown");
+
+    boot.fs_image_base = 0;
+    boot.fs_image_size = 0;
+    EFI_PHYSICAL_ADDRESS fs_base = 0;
+    UINTN fs_size = 0;
+    status = read_fs_image(root, &fs_base, &fs_size);
+    if (!EFI_ERROR(status)) {
+        boot.fs_image_base = fs_base;
+        boot.fs_image_size = fs_size;
+        Print(L"[loader] FS image loaded (%u bytes)\r\n", (UINT32)fs_size);
+    } else {
+        Print(L"[loader] FS image missing; kernel will format RAM FS\r\n");
+    }
 
     query_framebuffer(&boot.framebuffer);
     describe_boot_device(image_handle, &boot.boot_device);
@@ -182,6 +197,57 @@ static EFI_STATUS read_kernel_file(EFI_FILE_PROTOCOL *root, VOID **buffer, UINTN
         *buffer = NULL;
         return EFI_BAD_BUFFER_SIZE;
     }
+    return EFI_SUCCESS;
+}
+
+static EFI_STATUS read_fs_image(EFI_FILE_PROTOCOL *root, EFI_PHYSICAL_ADDRESS *out_base, UINTN *out_size) {
+    EFI_FILE_PROTOCOL *file = NULL;
+    EFI_STATUS status = uefi_call_wrapper(root->Open, 5, root, &file, FS_IMAGE_PATH, EFI_FILE_MODE_READ, 0);
+    if (EFI_ERROR(status)) {
+        return status;
+    }
+
+    UINTN info_size = 0;
+    status = uefi_call_wrapper(file->GetInfo, 4, file, &gEfiFileInfoGuid, &info_size, NULL);
+    if (status != EFI_BUFFER_TOO_SMALL) {
+        uefi_call_wrapper(file->Close, 1, file);
+        return status;
+    }
+
+    EFI_FILE_INFO *info = NULL;
+    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, info_size, (VOID **)&info);
+    if (EFI_ERROR(status)) {
+        uefi_call_wrapper(file->Close, 1, file);
+        return status;
+    }
+
+    status = uefi_call_wrapper(file->GetInfo, 4, file, &gEfiFileInfoGuid, &info_size, info);
+    if (EFI_ERROR(status)) {
+        uefi_call_wrapper(BS->FreePool, 1, info);
+        uefi_call_wrapper(file->Close, 1, file);
+        return status;
+    }
+
+    *out_size = info->FileSize;
+    UINTN aligned = ALIGN_UP(*out_size, EFI_PAGE_SIZE);
+    EFI_PHYSICAL_ADDRESS dest = 0;
+    status = uefi_call_wrapper(BS->AllocatePages, 4, AllocateAnyPages, EfiLoaderData, EFI_SIZE_TO_PAGES(aligned), &dest);
+    if (EFI_ERROR(status)) {
+        uefi_call_wrapper(BS->FreePool, 1, info);
+        uefi_call_wrapper(file->Close, 1, file);
+        return status;
+    }
+
+    UINTN read_size = *out_size;
+    status = uefi_call_wrapper(file->Read, 3, file, &read_size, (VOID *)(UINTN)dest);
+    uefi_call_wrapper(BS->FreePool, 1, info);
+    uefi_call_wrapper(file->Close, 1, file);
+    if (EFI_ERROR(status) || read_size != *out_size) {
+        uefi_call_wrapper(BS->FreePages, 2, dest, EFI_SIZE_TO_PAGES(aligned));
+        return EFI_BAD_BUFFER_SIZE;
+    }
+
+    *out_base = dest;
     return EFI_SUCCESS;
 }
 

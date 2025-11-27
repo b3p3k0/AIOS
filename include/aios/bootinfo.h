@@ -41,6 +41,8 @@ struct aios_boot_info {
     uint64_t kernel_size;
     uint64_t entry_point;
     uint64_t rsdp_address;
+    uint64_t fs_image_base; /* physical address of RAM disk (optional) */
+    uint64_t fs_image_size; /* bytes */
     char accel_mode[8]; /* "KVM" or "TCG" (null-terminated) */
     struct aios_framebuffer framebuffer;
     struct aios_memory_map memory_map;

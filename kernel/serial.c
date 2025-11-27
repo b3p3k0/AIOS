@@ -17,6 +17,10 @@ static void serial_wait(void) {
     }
 }
 
+static int serial_ready(void) {
+    return inb(COM1_PORT + 5) & 0x01;
+}
+
 void serial_init(void) {
     outb(COM1_PORT + 1, 0x00);
     outb(COM1_PORT + 3, 0x80);
@@ -36,6 +40,13 @@ void serial_write(const char *str) {
         serial_wait();
         outb(COM1_PORT, (uint8_t)*str++);
     }
+}
+
+int serial_getc(void) {
+    while (!serial_ready()) {
+        /* spin */
+    }
+    return inb(COM1_PORT);
 }
 
 static const char HEX_TABLE[] = "0123456789ABCDEF";
