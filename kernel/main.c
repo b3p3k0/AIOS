@@ -6,6 +6,7 @@
 #include "kernel/mem.h"
 #include "fs/fs.h"
 #include "kernel/shell.h"
+#include "virtio_blk.h"
 
 static uint32_t checksum_bootinfo(const struct aios_boot_info *boot) {
     struct aios_boot_info tmp = *boot;
@@ -86,22 +87,52 @@ void kernel_entry(struct aios_boot_info *boot) {
     static uint8_t heap_area[256 * 1024];
     mem_init(heap_area, sizeof(heap_area));
 
-    fs_t fs;
     static uint8_t fs_fallback[4 * 1024 * 1024];
-    void *fs_base = (boot->fs_image_base && boot->fs_image_size) ? (void *)(uintptr_t)boot->fs_image_base : fs_fallback;
-    uint32_t fs_bytes = (boot->fs_image_base && boot->fs_image_size) ? (uint32_t)boot->fs_image_size : (uint32_t)sizeof(fs_fallback);
-    int mounted = -1;
-    mounted = fs_mount_ram(&fs, fs_base, fs_bytes);
-    if (mounted != 0) {
-        serial_write("[kernel] No FS image; formatting fresh RAM FS\r\n");
-        uint32_t bytes = fs_bytes;
-        if (fs_format_ram(&fs, fs_base, bytes, 256, FS_DEFAULT_BLOCK_SIZE) != 0) {
-            serial_write("[kernel] FS format failed; halting\r\n");
-            goto halt;
+    void *seed_base = (boot->fs_image_base && boot->fs_image_size) ? (void *)(uintptr_t)boot->fs_image_base : fs_fallback;
+    uint32_t seed_bytes = (boot->fs_image_base && boot->fs_image_size) ? (uint32_t)boot->fs_image_size : (uint32_t)sizeof(fs_fallback);
+
+    struct storage_state storage;
+    memset(&storage, 0, sizeof(storage));
+
+    if (bd_init_ram(&storage.ram_dev, seed_base, seed_bytes, FS_DEFAULT_BLOCK_SIZE) != 0) {
+        serial_write("[kernel] RAM disk init failed\r\n");
+        goto halt;
+    }
+    storage.ram_seed_present = (boot->fs_image_base && boot->fs_image_size);
+    storage.ram_seed_blocks = storage.ram_dev.blocks;
+    storage.ram_seed_block_size = storage.ram_dev.block_size;
+
+    if (virtio_blk_init(&storage.virtio) == 0) {
+        if (bd_init_virtio(&storage.virtio_dev, &storage.virtio, FS_DEFAULT_BLOCK_SIZE) == 0) {
+            storage.virtio_present = true;
+            storage.active_dev = &storage.virtio_dev;
+            if (fs_mount(&storage.fs, &storage.virtio_dev) == 0) {
+                storage.fs_ready = true;
+                storage.using_ram = false;
+            } else {
+                storage.needs_format = true;
+            }
         }
     }
 
-    shell_run(&fs, fs_root_inode(&fs), "/");
+    if (!storage.virtio_present) {
+        if (fs_mount(&storage.fs, &storage.ram_dev) != 0) {
+            serial_write("[kernel] No FS image; formatting RAM FS\r\n");
+            if (fs_format(&storage.fs, &storage.ram_dev, 256) != 0 || fs_mount(&storage.fs, &storage.ram_dev) != 0) {
+                serial_write("[kernel] RAM FS setup failed; halting\r\n");
+                goto halt;
+            }
+        }
+        storage.fs_ready = true;
+        storage.using_ram = true;
+        storage.active_dev = &storage.ram_dev;
+    }
+
+    struct shell_env env = {
+        .storage = &storage,
+        .boot = boot
+    };
+    shell_run(&env);
 
 halt:
     for (;;) { __asm__ __volatile__("hlt"); }

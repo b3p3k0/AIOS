@@ -4,13 +4,16 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* In-kernel block device abstraction.
- * For Phase 1.5 we back this with a RAM disk passed from the loader.
- */
+struct blockdev;
+typedef int (*block_read_fn)(struct blockdev *bd, uint32_t block, void *buf);
+typedef int (*block_write_fn)(struct blockdev *bd, uint32_t block, const void *buf);
+
 struct blockdev {
-    uint8_t *base;      /* start of disk image in RAM */
-    uint32_t blocks;    /* number of blocks available */
+    void *ctx;
+    uint32_t blocks;
     uint32_t block_size;
+    block_read_fn read_fn;
+    block_write_fn write_fn;
 };
 
 int bd_init_ram(struct blockdev *bd, void *base, uint32_t bytes, uint32_t block_size);

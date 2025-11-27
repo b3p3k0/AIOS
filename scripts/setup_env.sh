@@ -9,6 +9,8 @@ ESP_STAGING="$BUILD_DIR/esp"
 IMAGE_DIR="$PROJECT_ROOT/images"
 IMAGE_PATH="$IMAGE_DIR/aios-efi.img"
 IMAGE_SIZE="${IMAGE_SIZE:-64M}"
+DATA_IMAGE="$IMAGE_DIR/aios-data.img"
+DATA_IMAGE_SIZE="${DATA_IMAGE_SIZE:-32M}"
 EFI_BINARY="$ESP_STAGING/EFI/BOOT/BOOTX64.EFI" # UEFI removable-media fallback. Spec §3.5.1.
 KERNEL_BINARY="$ESP_STAGING/AIOS/KERNEL.ELF"
 KERNEL_ELF="$KERNEL_BUILD_DIR/kernel.elf"
@@ -177,7 +179,8 @@ build_kernel() {
         "$PROJECT_ROOT/kernel/mem.c" \
         "$PROJECT_ROOT/kernel/fs/blockdev.c" \
         "$PROJECT_ROOT/kernel/fs/fs.c" \
-        "$PROJECT_ROOT/kernel/shell.c"; do
+        "$PROJECT_ROOT/kernel/shell.c" \
+        "$PROJECT_ROOT/kernel/virtio_blk.c"; do
         local obj="$KERNEL_BUILD_DIR/$(basename "${src%.*}").o"
         x86_64-linux-gnu-gcc "${cflags[@]}" -c "$src" -o "$obj"
         objs+=("$obj")
@@ -207,6 +210,11 @@ create_image() {
     mmd -i "$IMAGE_PATH" ::EFI ::EFI/BOOT ::AIOS
     mcopy -i "$IMAGE_PATH" "$EFI_BINARY" ::/EFI/BOOT/BOOTX64.EFI
     mcopy -i "$IMAGE_PATH" "$KERNEL_ELF" ::/AIOS/KERNEL.ELF
+
+    if [[ ! -f "$DATA_IMAGE" ]]; then
+        log "Creating virtio data disk at $DATA_IMAGE"
+        truncate -s "$DATA_IMAGE_SIZE" "$DATA_IMAGE"
+    fi
 }
 
 prepare_ovmf_vars() {
@@ -242,7 +250,9 @@ run_qemu() {
         -m 512 \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
         -drive if=pflash,format=raw,file="$OVMF_VARS" \
-        -drive if=virtio,format=raw,file="$IMAGE_PATH" \
+        -drive if=ide,format=raw,file="$IMAGE_PATH" \
+        -drive if=none,format=raw,file="$DATA_IMAGE",id=aiosdata \
+        -device virtio-blk-pci,drive=aiosdata,disable-modern=on \
         -serial stdio
 }
 

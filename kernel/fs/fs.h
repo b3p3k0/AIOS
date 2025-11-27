@@ -53,9 +53,8 @@ typedef struct fs {
     uint8_t *data_bitmap;
 } fs_t;
 
-/* In-kernel entry points */
-int fs_format_ram(fs_t *fs, void *base, uint32_t bytes, uint32_t inode_count, uint32_t block_size);
-int fs_mount_ram(fs_t *fs, void *base, uint32_t bytes);
+int fs_format(fs_t *fs, struct blockdev *bd, uint32_t inode_count);
+int fs_mount(fs_t *fs, struct blockdev *bd);
 
 uint32_t fs_root_inode(const fs_t *fs);
 

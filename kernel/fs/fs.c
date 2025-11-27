@@ -233,9 +233,10 @@ static int resolve_path(fs_t *fs, uint32_t start_ino, const char *path, struct f
 
 /* Public API */
 
-int fs_format_ram(fs_t *fs, void *base, uint32_t bytes, uint32_t inode_count, uint32_t block_size) {
-    if (bd_init_ram(&fs->bd, base, bytes, block_size) != 0) return -1;
-    uint32_t total_blocks = bytes / block_size;
+int fs_format(fs_t *fs, struct blockdev *bd, uint32_t inode_count) {
+    fs->bd = *bd;
+    uint32_t total_blocks = bd->blocks;
+    uint32_t block_size = bd->block_size;
     if (layout_compute(&fs->sb, total_blocks, inode_count, block_size) != 0) return -1;
 
     /* Zero disk */
@@ -284,8 +285,8 @@ int fs_format_ram(fs_t *fs, void *base, uint32_t bytes, uint32_t inode_count, ui
     return 0;
 }
 
-int fs_mount_ram(fs_t *fs, void *base, uint32_t bytes) {
-    if (bd_init_ram(&fs->bd, base, bytes, FS_DEFAULT_BLOCK_SIZE) != 0) return -1;
+int fs_mount(fs_t *fs, struct blockdev *bd) {
+    fs->bd = *bd;
     if (read_superblock(fs) != 0) return -1;
     if (load_bitmap(fs, &fs->inode_bitmap, fs->sb.inode_bitmap_start, fs->sb.inode_bitmap_blocks) != 0) return -1;
     if (load_bitmap(fs, &fs->data_bitmap, fs->sb.data_bitmap_start, fs->sb.data_bitmap_blocks) != 0) return -1;
