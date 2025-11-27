@@ -4,9 +4,10 @@ AIOS walks readers from power-on to a toy 64-bit kernel with guardrail-quality d
 
 ## Quick Start
 1. Clone this repo on Ubuntu 24.04 with sudo privileges and virtualization enabled.
-2. Run `make deps` once to install build, image, and virtualization tooling.
-3. Run `make image` to compile `bootloader/hello-efi` and stage `/EFI/BOOT/BOOTX64.EFI` inside `images/aios-efi.img`.
-4. Run `make run` to launch QEMU with the system disk plus OVMF firmware. You should see "Hello from AIOS – EFI test" in the firmware console; press any key to exit.
+2. If `make` isn't installed on your workstation (Ubuntu Desktop omits it), run `sudo apt-get update && sudo apt-get install -y make`.
+3. Run `make deps` once to install build, image, and virtualization tooling.
+4. Run `make image` to compile `bootloader/hello-efi` and stage `/EFI/BOOT/BOOTX64.EFI` inside `images/aios-efi.img`.
+5. Run `make run` to launch QEMU with the system disk plus OVMF firmware. You should see "Hello from AIOS – EFI test" in the firmware console; press any key to exit.
 
 Each Makefile target wraps `scripts/setup_env.sh`, so you can also call the script directly (`./scripts/setup_env.sh help`).
 

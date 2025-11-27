@@ -29,7 +29,8 @@ install_deps() {
     log "Installing Ubuntu 24.04 build dependencies via apt"
     need_root_packages
     sudo apt-get update
-    sudo apt-get install -y \
+    # Noninteractive mode prevents debconf prompts from stalling CI/agent runs.
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
         build-essential \
         clang \
         lld \
