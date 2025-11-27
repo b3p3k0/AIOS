@@ -1,12 +1,14 @@
 #include <efi.h>
 #include <efilib.h>
 #include <elf.h>
+#include <stddef.h>
 
 #include "aios/bootinfo.h"
 
 #define KERNEL_PATH L"\\AIOS\\KERNEL.ELF"
 #define ALIGN_DOWN(value, align) ((value) & ~((align) - 1))
 #define ALIGN_UP(value, align)   (((value) + ((align) - 1)) & ~((align) - 1))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 struct loaded_kernel {
     EFI_PHYSICAL_ADDRESS base;
@@ -31,12 +33,16 @@ static EFI_STATUS prepare_memory_map(struct memory_map *map);
 static EFI_STATUS exit_boot_services_with_map(EFI_HANDLE image_handle, struct memory_map *map);
 static EFI_PHYSICAL_ADDRESS find_rsdp(void);
 static EFI_STATUS query_framebuffer(struct aios_framebuffer *fb);
+static EFI_STATUS describe_boot_device(EFI_HANDLE image_handle, struct aios_block_device *dev);
+static VOID summarize_memory(const struct memory_map *map, struct aios_memory_summary *summary);
+static UINT32 checksum_bootinfo(const struct aios_boot_info *boot);
 static VOID free_memory_map(struct memory_map *map);
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     InitializeLib(image_handle, system_table);
 
-    Print(L"AIOS loader — Phase 1 prototype\r\n");
+    Print(L"[loader] Firmware -> Loader -> Kernel -> [paging soon]\r\n");
+    Print(L"[loader] Stage: starting loader\r\n");
 
     EFI_FILE_PROTOCOL *root = NULL;
     EFI_STATUS status = open_root(image_handle, &root);
@@ -52,6 +58,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
         Print(L"Unable to read %s: %r\r\n", KERNEL_PATH, status);
         return status;
     }
+    Print(L"[loader] Stage: kernel image loaded (%u bytes)\r\n", (UINT32)kernel_size);
 
     struct loaded_kernel kernel = {0};
     status = load_kernel_image(kernel_file, kernel_size, &kernel);
@@ -69,8 +76,14 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
         .entry_point = kernel.entry,
         .rsdp_address = find_rsdp(),
     };
+    SetMem(boot.accel_mode, sizeof boot.accel_mode, 0);
+#ifdef ACCEL_MODE
+    CopyMem(boot.accel_mode, ACCEL_MODE, MIN(sizeof boot.accel_mode - 1, (UINTN)4));
+#endif
+    Print(L"[loader] Accel: %a\r\n", boot.accel_mode[0] ? boot.accel_mode : "unknown");
 
     query_framebuffer(&boot.framebuffer);
+    describe_boot_device(image_handle, &boot.boot_device);
 
     struct memory_map map = {0};
     while (TRUE) {
@@ -84,7 +97,24 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
         boot.memory_map.size = map.size;
         boot.memory_map.descriptor_size = map.descriptor_size;
         boot.memory_map.descriptor_version = map.descriptor_version;
+        summarize_memory(&map, &boot.memory_summary);
 
+        Print(L"[loader] Stage: memory map captured (%u bytes, %u descriptors)\r\n",
+              (UINT32)map.size, (UINT32)(map.size / map.descriptor_size));
+        Print(L"[loader] RAM usable total: %u KB, largest range: 0x%lx (%u KB)\r\n",
+              (UINT32)(boot.memory_summary.total_usable_bytes / 1024),
+              boot.memory_summary.largest_usable_base,
+              (UINT32)(boot.memory_summary.largest_usable_size / 1024));
+        Print(L"[loader] Framebuffer: %ux%u @ 0x%lx\r\n",
+              boot.framebuffer.width,
+              boot.framebuffer.height,
+              boot.framebuffer.base);
+        Print(L"[loader] RSDP: 0x%lx\r\n", boot.rsdp_address);
+        Print(L"[loader] Boot media: %u KB, block %u, %s\r\n",
+              (UINT32)(boot.boot_device.total_bytes / 1024),
+              boot.boot_device.block_size,
+              boot.boot_device.removable ? L"removable" : L"fixed");
+        Print(L"[loader] Stage: about to exit boot services\r\n");
         status = exit_boot_services_with_map(image_handle, &map);
         if (status == EFI_SUCCESS) {
             break;
@@ -97,8 +127,9 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
         /* Memory map changed between calls. Retry. */
     }
 
-    free_memory_map(&map);
-
+    Print(L"[loader] Stage: boot services exited, jumping to kernel\r\n");
+    boot.checksum = checksum_bootinfo(&boot);
+    Print(L"[loader] Handoff checksum: 0x%08x\r\n", boot.checksum);
     typedef void (*kernel_entry_t)(struct aios_boot_info *);
     kernel_entry_t entry = (kernel_entry_t)(UINTN)kernel.entry;
     entry(&boot);
@@ -295,6 +326,61 @@ static EFI_STATUS query_framebuffer(struct aios_framebuffer *fb) {
     fb->pixels_per_scanline = gop->Mode->Info->PixelsPerScanLine;
     fb->bpp = 32; /* GOP always exposes linear framebuffer for us */
     return EFI_SUCCESS;
+}
+
+static EFI_STATUS describe_boot_device(EFI_HANDLE image_handle, struct aios_block_device *dev) {
+    EFI_LOADED_IMAGE_PROTOCOL *loaded_image = NULL;
+    EFI_STATUS status = uefi_call_wrapper(BS->HandleProtocol, 3, image_handle, &gEfiLoadedImageProtocolGuid, (VOID **)&loaded_image);
+    if (EFI_ERROR(status)) {
+        return status;
+    }
+    EFI_BLOCK_IO_PROTOCOL *blk = NULL;
+    status = uefi_call_wrapper(BS->HandleProtocol, 3, loaded_image->DeviceHandle, &gEfiBlockIoProtocolGuid, (VOID **)&blk);
+    if (EFI_ERROR(status)) {
+        dev->total_bytes = 0;
+        dev->block_size = 0;
+        dev->removable = 0;
+        SetMem(dev->label, sizeof dev->label, 0);
+        return status;
+    }
+    EFI_BLOCK_IO_MEDIA *m = blk->Media;
+    dev->block_size = m->BlockSize;
+    dev->total_bytes = (m->LastBlock + 1) * (UINT64)m->BlockSize;
+    dev->removable = m->RemovableMedia ? 1 : 0;
+    SetMem(dev->label, sizeof dev->label, 0);
+    CopyMem(dev->label, "bootdev", 7);
+    return EFI_SUCCESS;
+}
+
+static VOID summarize_memory(const struct memory_map *map, struct aios_memory_summary *summary) {
+    summary->total_usable_bytes = 0;
+    summary->largest_usable_base = 0;
+    summary->largest_usable_size = 0;
+    UINTN entries = map->size / map->descriptor_size;
+    for (UINTN i = 0; i < entries; ++i) {
+        EFI_MEMORY_DESCRIPTOR *d = (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)map->buffer + (i * map->descriptor_size));
+        if (d->Type == EfiConventionalMemory) {
+            UINT64 bytes = d->NumberOfPages * EFI_PAGE_SIZE;
+            summary->total_usable_bytes += bytes;
+            if (bytes > summary->largest_usable_size) {
+                summary->largest_usable_size = bytes;
+                summary->largest_usable_base = d->PhysicalStart;
+            }
+        }
+    }
+}
+
+static UINT32 checksum_bootinfo(const struct aios_boot_info *boot) {
+    struct aios_boot_info tmp;
+    CopyMem(&tmp, boot, sizeof tmp);
+    tmp.checksum = 0;
+    UINT32 sum = 0;
+    const UINT32 *words = (const UINT32 *)&tmp;
+    size_t count = sizeof(tmp) / sizeof(UINT32);
+    for (size_t i = 0; i < count; ++i) {
+        sum ^= words[i];
+    }
+    return sum;
 }
 
 static VOID free_memory_map(struct memory_map *map) {

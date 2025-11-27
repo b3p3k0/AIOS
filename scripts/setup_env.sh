@@ -107,6 +107,11 @@ build_loader() {
     local crt0="${EFI_CRT0:-$(find_artifact 'crt0-efi (x86_64)' 'EFI_CRT0' "${GNU_EFI_CRT0_CANDIDATES[@]}")}"
     local crt0_dir="$(dirname "$crt0")"
 
+    local accel_cflag='-DACCEL_MODE="TCG"'
+    if [[ -e /dev/kvm && -r /dev/kvm && -w /dev/kvm ]]; then
+        accel_cflag='-DACCEL_MODE="KVM"'
+    fi
+
     log "Compiling AIOS UEFI loader"
     # GNU-EFI exposes canonical typedefs/startup glue so stock GCC can target
     # PE32+ EFI binaries without a custom cross-toolchain. [GNU-EFI —
@@ -115,6 +120,7 @@ build_loader() {
         -I/usr/include/efi \
         -I/usr/include/efi/x86_64 \
         -I"$PROJECT_ROOT/include" \
+        "$accel_cflag" \
         -fPIC \
         -fshort-wchar \
         -mno-red-zone \
