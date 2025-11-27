@@ -190,11 +190,11 @@ void shell_run(fs_t *fs, uint32_t start_inode, const char *start_path) {
             if (fs_write_file(fs, cwd, argv[1], (uint8_t *)buf, total, 0) != 0) print("write failed\r\n");
             continue;
         }
-        if (strcmp(argv[0], "cd") == 0 && argc > 1) {
+        if (strcmp(argv[0], "goin") == 0 && argc > 1) {
             struct fs_inode node;
             uint32_t ino;
             if (fs_lookup(fs, cwd, argv[1], &node, &ino) != 0 || node.type != FS_INODE_DIR) {
-                print("cd failed\r\n"); continue;
+                print("goin failed\r\n"); continue;
             }
             char new_path[PATH_MAX];
             path_normalize(cwd_path, argv[1], new_path);
