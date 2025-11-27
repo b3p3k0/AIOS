@@ -1,11 +1,11 @@
 SETUP := ./scripts/setup_env.sh
 
-.PHONY: deps hello image run all clean
+.PHONY: deps build image run all clean
 
 deps:
 	$(SETUP) deps
 
-hello:
+build:
 	$(SETUP) build
 
 image:

@@ -3,12 +3,15 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
-EFI_BUILD_DIR="$BUILD_DIR/hello-efi"
+EFI_BUILD_DIR="$BUILD_DIR/loader"
+KERNEL_BUILD_DIR="$BUILD_DIR/kernel"
 ESP_STAGING="$BUILD_DIR/esp"
 IMAGE_DIR="$PROJECT_ROOT/images"
 IMAGE_PATH="$IMAGE_DIR/aios-efi.img"
 IMAGE_SIZE="${IMAGE_SIZE:-64M}"
 EFI_BINARY="$ESP_STAGING/EFI/BOOT/BOOTX64.EFI" # UEFI removable-media fallback. Spec §3.5.1.
+KERNEL_BINARY="$ESP_STAGING/AIOS/KERNEL.ELF"
+KERNEL_ELF="$KERNEL_BUILD_DIR/kernel.elf"
 
 OVMF_CODE_DEFAULT="/usr/share/OVMF/OVMF_CODE.fd"
 OVMF_VARS_TEMPLATE_DEFAULT="/usr/share/OVMF/OVMF_VARS.fd" # TianoCore/OVMF template vars.
@@ -92,10 +95,10 @@ install_deps() {
 }
 
 ensure_dirs() {
-    mkdir -p "$EFI_BUILD_DIR" "$ESP_STAGING/EFI/BOOT" "$IMAGE_DIR"
+    mkdir -p "$EFI_BUILD_DIR" "$KERNEL_BUILD_DIR" "$ESP_STAGING/EFI/BOOT" "$ESP_STAGING/AIOS" "$IMAGE_DIR"
 }
 
-build_hello() {
+build_loader() {
     ensure_dirs
     local src="$PROJECT_ROOT/bootloader/hello-efi/main.c"
     local obj="$EFI_BUILD_DIR/main.o"
@@ -104,13 +107,14 @@ build_hello() {
     local crt0="${EFI_CRT0:-$(find_artifact 'crt0-efi (x86_64)' 'EFI_CRT0' "${GNU_EFI_CRT0_CANDIDATES[@]}")}"
     local crt0_dir="$(dirname "$crt0")"
 
-    log "Compiling hello-efi sample"
+    log "Compiling AIOS UEFI loader"
     # GNU-EFI exposes canonical typedefs/startup glue so stock GCC can target
     # PE32+ EFI binaries without a custom cross-toolchain. [GNU-EFI —
     # https://sourceforge.net/projects/gnu-efi/]
     x86_64-linux-gnu-gcc \
         -I/usr/include/efi \
         -I/usr/include/efi/x86_64 \
+        -I"$PROJECT_ROOT/include" \
         -fPIC \
         -fshort-wchar \
         -mno-red-zone \
@@ -139,10 +143,43 @@ build_hello() {
         "$so" "$EFI_BINARY"
 }
 
+build_kernel() {
+    ensure_dirs
+    log "Compiling AIOS kernel stub (ELF)"
+    local cflags=(
+        -ffreestanding
+        -fno-stack-protector
+        -fno-pie
+        -mno-red-zone
+        -m64
+        -mcmodel=large
+        -Wall
+        -Wextra
+        -Werror
+        -nostdlib
+        -I"$PROJECT_ROOT/include"
+        -I"$PROJECT_ROOT"
+    )
+
+    local objs=()
+    for src in "$PROJECT_ROOT/kernel/main.c" "$PROJECT_ROOT/kernel/serial.c" "$PROJECT_ROOT/kernel/util.c"; do
+        local obj="$KERNEL_BUILD_DIR/$(basename "${src%.*}").o"
+        x86_64-linux-gnu-gcc "${cflags[@]}" -c "$src" -o "$obj"
+        objs+=("$obj")
+    done
+
+    x86_64-linux-gnu-ld \
+        -nostdlib \
+        -z max-page-size=0x1000 \
+        -T "$PROJECT_ROOT/kernel/link.ld" \
+        -o "$KERNEL_ELF" \
+        "${objs[@]}"
+}
+
 create_image() {
     ensure_dirs
-    if [[ ! -f "$EFI_BINARY" ]]; then
-        echo "EFI binary missing. Run '$0 build' first." >&2
+    if [[ ! -f "$EFI_BINARY" || ! -f "$KERNEL_ELF" ]]; then
+        echo "Loader or kernel missing. Run '$0 build' first." >&2
         exit 1
     fi
 
@@ -151,9 +188,10 @@ create_image() {
     truncate -s "$IMAGE_SIZE" "$IMAGE_PATH"
     mkfs.vfat -F 32 -n AIOS_EFI "$IMAGE_PATH"
 
-    log "Copying BOOTX64.EFI into EFI system partition"
-    mmd -i "$IMAGE_PATH" ::EFI ::EFI/BOOT
+    log "Copying artifacts into EFI system partition"
+    mmd -i "$IMAGE_PATH" ::EFI ::EFI/BOOT ::AIOS
     mcopy -i "$IMAGE_PATH" "$EFI_BINARY" ::/EFI/BOOT/BOOTX64.EFI
+    mcopy -i "$IMAGE_PATH" "$KERNEL_ELF" ::/AIOS/KERNEL.ELF
 }
 
 prepare_ovmf_vars() {
@@ -205,8 +243,8 @@ Usage: scripts/setup_env.sh <command>
 
 Commands:
   deps     Install Ubuntu packages required for AIOS Phase 0.
-  build    Compile the hello-efi sample application.
-  image    Build hello-efi (if needed) and generate the FAT32 disk image.
+  build    Compile the UEFI loader and ELF kernel.
+  image    Build loader+kernel (if needed) and generate the FAT32 disk image.
   run      Launch QEMU/OVMF using the generated disk image.
   all      deps -> build -> image -> run (default when no command is given).
   clean    Remove build artifacts and disk images.
@@ -221,10 +259,12 @@ main() {
             install_deps
             ;;
         build)
-            build_hello
+            build_loader
+            build_kernel
             ;;
         image)
-            build_hello
+            build_loader
+            build_kernel
             create_image
             ;;
         run)
@@ -232,7 +272,8 @@ main() {
             ;;
         all)
             install_deps
-            build_hello
+            build_loader
+            build_kernel
             create_image
             run_qemu
             ;;
