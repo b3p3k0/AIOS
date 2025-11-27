@@ -10,9 +10,26 @@ IMAGE_PATH="$IMAGE_DIR/aios-efi.img"
 IMAGE_SIZE="${IMAGE_SIZE:-64M}"
 EFI_BINARY="$ESP_STAGING/EFI/BOOT/BOOTX64.EFI" # UEFI removable-media fallback. Spec §3.5.1.
 
-OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE.fd}"
-OVMF_VARS_TEMPLATE="${OVMF_VARS_TEMPLATE:-/usr/share/OVMF/OVMF_VARS.fd}" # TianoCore/OVMF template vars.
+OVMF_CODE_DEFAULT="/usr/share/OVMF/OVMF_CODE.fd"
+OVMF_VARS_TEMPLATE_DEFAULT="/usr/share/OVMF/OVMF_VARS.fd" # TianoCore/OVMF template vars.
+OVMF_CODE="${OVMF_CODE:-$OVMF_CODE_DEFAULT}"
+OVMF_VARS_TEMPLATE="${OVMF_VARS_TEMPLATE:-$OVMF_VARS_TEMPLATE_DEFAULT}"
 OVMF_VARS="$BUILD_DIR/OVMF_VARS.fd"
+
+OVMF_CODE_CANDIDATES=(
+    /usr/share/OVMF/OVMF_CODE.fd
+    /usr/share/OVMF/OVMF_CODE_4M.fd
+    /usr/share/OVMF/OVMF_CODE.secboot.fd
+    /usr/share/ovmf/OVMF_CODE.fd
+    /usr/share/edk2/ovmf/OVMF_CODE.fd
+)
+OVMF_VARS_CANDIDATES=(
+    /usr/share/OVMF/OVMF_VARS.fd
+    /usr/share/OVMF/OVMF_VARS_4M.fd
+    /usr/share/OVMF/OVMF_VARS.secboot.fd
+    /usr/share/ovmf/OVMF_VARS.fd
+    /usr/share/edk2/ovmf/OVMF_VARS.fd
+)
 
 GNU_EFI_LDS_CANDIDATES=(
     /usr/lib/gnu-efi/elf_x86_64_efi.lds
@@ -29,7 +46,7 @@ log() {
     printf '[setup_env] %s\n' "$1"
 }
 
-find_gnu_efi_artifact() {
+find_artifact() {
     local label="$1"
     local env_hint="$2"
     shift 2
@@ -40,7 +57,7 @@ find_gnu_efi_artifact() {
         fi
     done
     cat >&2 <<EOF
-Missing $label. Install the 'gnu-efi' package or set $env_hint to point at the
+Missing $label. Install the appropriate package or set $env_hint to point at the
 correct file.
 EOF
     return 1
@@ -83,8 +100,8 @@ build_hello() {
     local src="$PROJECT_ROOT/bootloader/hello-efi/main.c"
     local obj="$EFI_BUILD_DIR/main.o"
     local so="$EFI_BUILD_DIR/hello.so"
-    local lds="${EFI_LDS:-$(find_gnu_efi_artifact 'elf_x86_64_efi.lds' 'EFI_LDS' "${GNU_EFI_LDS_CANDIDATES[@]}")}"
-    local crt0="${EFI_CRT0:-$(find_gnu_efi_artifact 'crt0-efi (x86_64)' 'EFI_CRT0' "${GNU_EFI_CRT0_CANDIDATES[@]}")}"
+    local lds="${EFI_LDS:-$(find_artifact 'elf_x86_64_efi.lds' 'EFI_LDS' "${GNU_EFI_LDS_CANDIDATES[@]}")}"
+    local crt0="${EFI_CRT0:-$(find_artifact 'crt0-efi (x86_64)' 'EFI_CRT0' "${GNU_EFI_CRT0_CANDIDATES[@]}")}"
     local crt0_dir="$(dirname "$crt0")"
 
     log "Compiling hello-efi sample"
@@ -140,14 +157,8 @@ create_image() {
 }
 
 prepare_ovmf_vars() {
-    if [[ ! -f "$OVMF_CODE" ]]; then
-        echo "OVMF_CODE firmware not found at $OVMF_CODE" >&2
-        exit 1
-    fi
-    if [[ ! -f "$OVMF_VARS_TEMPLATE" ]]; then
-        echo "OVMF_VARS template not found at $OVMF_VARS_TEMPLATE" >&2
-        exit 1
-    fi
+    OVMF_CODE="$(find_artifact 'OVMF_CODE firmware' 'OVMF_CODE' "$OVMF_CODE" "${OVMF_CODE_CANDIDATES[@]}")"
+    OVMF_VARS_TEMPLATE="$(find_artifact 'OVMF_VARS template' 'OVMF_VARS_TEMPLATE' "$OVMF_VARS_TEMPLATE" "${OVMF_VARS_CANDIDATES[@]}")"
     mkdir -p "$BUILD_DIR"
     if [[ ! -f "$OVMF_VARS" ]]; then
         cp "$OVMF_VARS_TEMPLATE" "$OVMF_VARS"
