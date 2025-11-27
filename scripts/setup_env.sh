@@ -14,8 +14,36 @@ OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE.fd}"
 OVMF_VARS_TEMPLATE="${OVMF_VARS_TEMPLATE:-/usr/share/OVMF/OVMF_VARS.fd}" # TianoCore/OVMF template vars.
 OVMF_VARS="$BUILD_DIR/OVMF_VARS.fd"
 
+GNU_EFI_LDS_CANDIDATES=(
+    /usr/lib/gnu-efi/elf_x86_64_efi.lds
+    /usr/lib/elf_x86_64_efi.lds
+    /usr/lib/x86_64-linux-gnu/gnu-efi/elf_x86_64_efi.lds
+)
+GNU_EFI_CRT0_CANDIDATES=(
+    /usr/lib/gnu-efi/x86_64/crt0-efi-amd64.o
+    /usr/lib/crt0-efi-x86_64.o
+    /usr/lib/x86_64-linux-gnu/gnu-efi/crt0-efi-amd64.o
+)
+
 log() {
     printf '[setup_env] %s\n' "$1"
+}
+
+find_gnu_efi_artifact() {
+    local label="$1"
+    local env_hint="$2"
+    shift 2
+    for candidate in "$@"; do
+        if [[ -f "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    cat >&2 <<EOF
+Missing $label. Install the 'gnu-efi' package or set $env_hint to point at the
+correct file.
+EOF
+    return 1
 }
 
 need_root_packages() {
@@ -55,6 +83,9 @@ build_hello() {
     local src="$PROJECT_ROOT/bootloader/hello-efi/main.c"
     local obj="$EFI_BUILD_DIR/main.o"
     local so="$EFI_BUILD_DIR/hello.so"
+    local lds="${EFI_LDS:-$(find_gnu_efi_artifact 'elf_x86_64_efi.lds' 'EFI_LDS' "${GNU_EFI_LDS_CANDIDATES[@]}")}"
+    local crt0="${EFI_CRT0:-$(find_gnu_efi_artifact 'crt0-efi (x86_64)' 'EFI_CRT0' "${GNU_EFI_CRT0_CANDIDATES[@]}")}"
+    local crt0_dir="$(dirname "$crt0")"
 
     log "Compiling hello-efi sample"
     # GNU-EFI exposes canonical typedefs/startup glue so stock GCC can target
@@ -77,9 +108,10 @@ build_hello() {
         -shared \
         -Bsymbolic \
         -L/usr/lib \
-        -T /usr/lib/gnu-efi/elf_x86_64_efi.lds \
+        -L"$crt0_dir" \
+        -T "$lds" \
         "$obj" \
-        /usr/lib/gnu-efi/x86_64/crt0-efi-amd64.o \
+        "$crt0" \
         -lgnuefi -lefi \
         -o "$so"
 
