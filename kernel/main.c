@@ -8,23 +8,6 @@
 #include "kernel/shell.h"
 #include "virtio_blk.h"
 
-static void print_ascii_banner(void) {
-    static const char *lines[] = {
-        " ________  ___  ________  ________",
-        "|\\   __  \\|\\  \\|\\   __  \\|\\   ____\\",
-        "\\ \\  \\|\\  \\ \\  \\ \\  \\|\\  \\ \\  \\___|_    ",
-        " \\ \\   __  \\ \\  \\ \\  \\\\  \\ \\_____  \\",
-        "  \\ \\  \\ \\  \\ \\  \\ \\\\  \\|____|\\  \\",
-        "   \\ \\__\\ \\__\\ \\__\\ \\_______\\____\\_\\  \\ ",
-        "    \\|__|\\|__|\\|__|\\|_______|\\_________\\",
-        "                            \\|_________|",
-    };
-    for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); ++i) {
-        serial_write(lines[i]);
-        serial_write("\r\n");
-    }
-    serial_write("\r\n");
-}
 static uint32_t checksum_bootinfo(const struct aios_boot_info *boot) {
     struct aios_boot_info tmp = *boot;
     tmp.checksum = 0;
@@ -99,7 +82,6 @@ void kernel_entry(struct aios_boot_info *boot) {
     serial_write("\r\n");
 
     serial_write("\r\n");
-    print_ascii_banner();
     serial_write("Welcome to AIOS — minimal hardware, maximal clarity.\r\n\r\n");
 
     /* Initialize bump heap */
