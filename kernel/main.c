@@ -9,17 +9,22 @@
 #include "virtio_blk.h"
 
 static void print_ascii_banner(void) {
-    serial_write(" ________  ___  ________  ________\r\n");
-    serial_write("|\\   __  \\|\\  \\|\\   __  \\|\\   ____\\\r\n");
-    serial_write("\\ \\  \\|\\  \\ \\  \\ \\  \\|\\  \\ \\  \\___|_    \r\n");
-    serial_write(" \\ \\   __  \\ \\  \\ \\  \\\\\  \\ \\_____  \\r\n");
-    serial_write("  \\ \\  \\ \\  \\ \\  \\ \\  \\\\\  \\|____|\\  \\r\n");
-    serial_write("   \\ \\__\\ \\__\\ \\__\\ \\_______\\____\\_\\  \\ \r\n");
-    serial_write("    \\|__|\\|__|\\|__|\\|_______|\\_________\\\r\n");
-    serial_write("                            \\|_________|\r\n");
+    static const char *lines[] = {
+        " ________  ___  ________  ________",
+        "|\\   __  \\|\\  \\|\\   __  \\|\\   ____\\",
+        "\\ \\  \\|\\  \\ \\  \\ \\  \\|\\  \\ \\  \\___|_    ",
+        " \\ \\   __  \\ \\  \\ \\  \\\\  \\ \\_____  \\",
+        "  \\ \\  \\ \\  \\ \\  \\ \\\\  \\|____|\\  \\",
+        "   \\ \\__\\ \\__\\ \\__\\ \\_______\\____\\_\\  \\ ",
+        "    \\|__|\\|__|\\|__|\\|_______|\\_________\\",
+        "                            \\|_________|",
+    };
+    for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); ++i) {
+        serial_write(lines[i]);
+        serial_write("\r\n");
+    }
     serial_write("\r\n");
 }
-
 static uint32_t checksum_bootinfo(const struct aios_boot_info *boot) {
     struct aios_boot_info tmp = *boot;
     tmp.checksum = 0;
