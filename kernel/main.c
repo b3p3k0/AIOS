@@ -11,12 +11,13 @@
 static void print_ascii_banner(void) {
     serial_write(" ________  ___  ________  ________\r\n");
     serial_write("|\\   __  \\|\\  \\|\\   __  \\|\\   ____\\\r\n");
-    serial_write("\\ \\  \\\|\\  \\ \\  \\ \\  \\\|\\  \\ \\  \\\___|_    \r\n");
-    serial_write(" \\ \\   __  \\ \\  \\ \\  \\\\  \\ \\_____  \\\r\n");
-    serial_write("  \\ \\  \\ \\  \\ \\  \\ \\  \\\\  \\\\|____|\\  \\\r\n");
+    serial_write("\\ \\  \\|\\  \\ \\  \\ \\  \\|\\  \\ \\  \\___|_    \r\n");
+    serial_write(" \\ \\   __  \\ \\  \\ \\  \\\\\  \\ \\_____  \\r\n");
+    serial_write("  \\ \\  \\ \\  \\ \\  \\ \\  \\\\\  \\|____|\\  \\r\n");
     serial_write("   \\ \\__\\ \\__\\ \\__\\ \\_______\\____\\_\\  \\ \r\n");
     serial_write("    \\|__|\\|__|\\|__|\\|_______|\\_________\\\r\n");
-    serial_write("                            \\|_________|\r\n\r\n");
+    serial_write("                            \\|_________|\r\n");
+    serial_write("\r\n");
 }
 
 static uint32_t checksum_bootinfo(const struct aios_boot_info *boot) {
