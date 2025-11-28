@@ -3,6 +3,7 @@
 #include "util.h"
 #include "mem.h"
 #include "fs/fs.h"
+#include "aios/bootinfo.h"
 
 #define LINE_MAX 256
 #define TOKEN_MAX 8
@@ -47,6 +48,7 @@ static void path_normalize(const char *cwd, const char *input, char *out) {
     static char comps[32][FS_MAX_NAME];
     const char *stack[32];
     int n = 0;
+    const int max = 32;
     if (input[0] != '/') {
         const char *p = cwd;
         const char *seg = p;
@@ -55,9 +57,12 @@ static void path_normalize(const char *cwd, const char *input, char *out) {
                 size_t len = (size_t)(p - seg);
                 if (len > 0) {
                     if (len >= FS_MAX_NAME) len = FS_MAX_NAME - 1;
-                    for (size_t i = 0; i < len; ++i) comps[n][i] = seg[i];
-                    comps[n][len] = '\0';
-                    stack[n++] = comps[n - 1];
+                    if (n < max) {
+                        for (size_t i = 0; i < len; ++i) comps[n][i] = seg[i];
+                        comps[n][len] = '\0';
+                        stack[n] = comps[n];
+                        n++;
+                    }
                 }
                 if (*p == '\0') break;
                 seg = p + 1;
@@ -77,9 +82,12 @@ static void path_normalize(const char *cwd, const char *input, char *out) {
                     if (n > 0) n--;
                 } else {
                     if (len >= FS_MAX_NAME) len = FS_MAX_NAME - 1;
-                    for (size_t i = 0; i < len; ++i) comps[n][i] = seg[i];
-                    comps[n][len] = '\0';
-                    stack[n++] = comps[n];
+                    if (n < max) {
+                        for (size_t i = 0; i < len; ++i) comps[n][i] = seg[i];
+                        comps[n][len] = '\0';
+                        stack[n] = comps[n];
+                        n++;
+                    }
                 }
             }
             if (*p == '\0') break;
