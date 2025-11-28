@@ -96,12 +96,6 @@ static inline void pci_write16(uint8_t bus, uint8_t device, uint8_t function, ui
     pci_write32(bus, device, function, offset, new_value);
 }
 
-static uint8_t pci_read8(uint8_t bus, uint8_t device, uint8_t function, uint8_t offset) {
-    uint32_t value = pci_read32(bus, device, function, offset);
-    uint8_t shift = (offset & 3) * 8;
-    return (uint8_t)((value >> shift) & 0xFF);
-}
-
 static void write_status(uint16_t iobase, uint8_t status) {
     outb(iobase + VIRTIO_REG_DEVICE_STATUS, status);
 }
