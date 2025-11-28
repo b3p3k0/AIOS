@@ -104,6 +104,7 @@ void kernel_entry(struct aios_boot_info *boot) {
     storage.ram_seed_block_size = storage.ram_dev.block_size;
 
     if (virtio_blk_init(&storage.virtio) == 0) {
+        serial_write("[kernel] Virtio block controller detected\r\n");
         if (bd_init_virtio(&storage.virtio_dev, &storage.virtio, FS_DEFAULT_BLOCK_SIZE) == 0) {
             storage.virtio_present = true;
             storage.active_dev = &storage.virtio_dev;
@@ -112,11 +113,16 @@ void kernel_entry(struct aios_boot_info *boot) {
                 storage.using_ram = false;
             } else {
                 storage.needs_format = true;
+                serial_write("[kernel] Virtio disk present but needs format\r\n");
             }
+        } else {
+            serial_write("[kernel] Virtio block init failed after detection\r\n");
         }
+    } else {
+        serial_write("[kernel] Virtio block controller not found\r\n");
     }
 
-    if (!storage.virtio_present) {
+    if (!storage.fs_ready) {
         if (fs_mount(&storage.fs, &storage.ram_dev) != 0) {
             serial_write("[kernel] No FS image; formatting RAM FS\r\n");
             if (fs_format(&storage.fs, &storage.ram_dev, 256) != 0 || fs_mount(&storage.fs, &storage.ram_dev) != 0) {
@@ -127,6 +133,7 @@ void kernel_entry(struct aios_boot_info *boot) {
         storage.fs_ready = true;
         storage.using_ram = true;
         storage.active_dev = &storage.ram_dev;
+        serial_write("[kernel] Using RAM-backed filesystem\r\n");
     }
 
     struct shell_env env = {

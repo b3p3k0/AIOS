@@ -232,9 +232,15 @@ static int virtio_blk_submit(struct virtio_blk *dev, uint32_t type, uint64_t sec
     dev->avail->idx++;
     queue_notify(dev->iobase, 0);
 
+    uint32_t spin = 0;
+    const uint32_t spin_limit = 1u << 24;
     while (dev->used->idx == dev->used_idx) {
         uint8_t isr = inb_port(dev->iobase + VIRTIO_REG_ISR_STATUS);
         if (isr & 0x1) break;
+        if (++spin >= spin_limit) {
+            return -1;
+        }
+        __asm__ __volatile__("pause");
     }
     dev->used_idx = dev->used->idx;
     if (*dev->status != 0) {
