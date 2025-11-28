@@ -11,15 +11,17 @@ Design philosophy: simple, easy to learn, fun to toy with — reminiscent of old
 
 Numeric type: all numbers are floating-point (double precision).
 
-Variables: single-letter variable names (A, B, ..., Z).
+Variables: identifiers may be any letter/underscore followed by letters, digits, or underscores (case-sensitive). A single namespace stores both numeric and string values.
 
 Arithmetic / Expressions: support +, -, *, /, and parentheses for grouping.
 
 Assignment: e.g. A = (3 + 4) * 2; — semicolon-terminated.
 
-Output: print(expr); — print numeric expression to console.
+Output: write(expr1, expr2, ...); — emit a comma-separated list of expressions followed by a newline. Numbers format to three decimal places, strings print verbatim, and the `+` operator concatenates adjoining strings/numbers before printing.
 
-Input: a simple input(var); — read a number from keyboard into variable. Enables scripts like “enter your name or number.”
+Input: read(var); — read a number from keyboard into a variable (still numeric-only). Scripts typically pair a `write` prompt with a `read` call for interaction.
+
+Strings: double-quoted string literals can be assigned to variables, concatenated with `+`, and compared with the standard relational operators (==, !=, <, <=, >, >=). Mixing string and numeric operands outside of `+` raises an error.
 
 Control flow:
 
@@ -33,18 +35,13 @@ Semantics: script runs top-to-bottom; variables persist across statements; simpl
 
 📄 Example Script (v0.1)
 // simple.aln
-print( 2 + 2 );
-A = 0;
-while (A < 5) {
-    print(A);
-    A = A + 1;
-}
+greeting = "Hello from alien, ";
+user = "pilot";
+write(greeting + user + "!");
 
-print("Enter a number: ");  // (see note below)
-input(A);
-print(A * 2.5);
-
-Note: for now print(expr) is limited to numeric expressions — string printing is not yet supported in v0.1. (If you want string support later we can expand.)
+write("Enter a number:");
+read(value);
+write("You typed ", value, ". Tripled that's ", value * 3, ".");
 
 🛠 Interpreter Behavior & Parser Rules
 
@@ -56,19 +53,19 @@ Medium
 Ruslan's Blog
 +2
 
-Variable storage: a simple symbol table (e.g. array or small fixed-size table for 26 variables).
+Variable storage: a simple global symbol table keyed by identifier strings.
 
-Input I/O: use standard input (keyboard) and standard output (console) — for example, reading via fgets() or scanf()-like approach, writing via printf().
+Input I/O: use standard input (keyboard) and standard output (console) — e.g., `write()` formatting via printf() and `read()` parsing via fgets()/strtod.
 W3Schools
 +2
 tutorialspoint.com
 +2
 
-Error handling: detect syntax errors and runtime errors (e.g. malformed syntax, unknown token, missing semicolon, undefined variable, invalid input for input()), report approximate line number + error hint.
+Error handling: detect syntax errors and runtime errors (e.g. malformed syntax, unknown token, missing semicolon, undefined variable, invalid data for read()), report approximate line number + error hint.
 
 ✅ What We Intentionally Leave Out (for v0.1)
 
-Strings (beyond maybe bare minimum, if at all) — no string type or string manipulation (for simplicity).
+String support stays minimal: literals + assignment + concatenation/comparison only. No slicing, substring search, or string input yet (text input remains numeric-only via read()).
 
 Arrays, functions, modules, scoping beyond global variables.
 
@@ -90,13 +87,13 @@ Semicolon-terminated statements keep grammar simple and unambiguous — easier t
 
 Structured control flow instead of GOTO avoids spaghetti-code, simplifies interpreter design, reduces pitfalls in parsing and execution (especially around error detection and stack/flow control).
 
-Minimal I/O (print, input) provides essential interactivity without complicating interpreter or runtime environment.
+Minimal I/O (write/read) provides essential interactivity without complicating interpreter or runtime environment, while basic strings make prompts friendlier.
 
 Given this lean core, the interpreter should remain small, easy to compile statically, and robust enough for educational / toy-project scripting.
 
 🔧 Implementation Notes (C-based interpreter)
 
-Use standard C I/O (stdin, stdout) to implement input() (e.g. via fgets() or simple scanf-style parsing) — that’s typical and supported cross-platform.
+Use standard C I/O (stdin, stdout) to implement read()/write() (e.g. fgets()+strtod for input, printf for output) — lightweight and portable.
 W3Schools
 +1
 
@@ -112,10 +109,10 @@ For error reporting: track line numbers (increment on newline detection during l
 
 Use this spec as “v0.1 canonical reference” for alien.
 
-Build/adjust the C-interpreter skeleton accordingly (update the earlier skeleton we wrote). Add input(...) support.
+Build/adjust the C-interpreter skeleton accordingly (update the earlier skeleton we wrote). Ensure read()/write() (with string literals, variables, and concatenation) are implemented.
 
-Write a small set of example .aln scripts (hello world, read-calc-print, simple loop/demo).
+Write a small set of example .aln scripts (hello world with strings, read/write demo, simple loop).
 
-Test thoroughly: valid scripts, invalid scripts (syntax errors, missing semicolons), edge cases (division by zero, input errors), to verify error reporting works.
+Test thoroughly: valid scripts, invalid scripts (syntax errors, missing semicolons), edge cases (division by zero, read/input errors), to verify error reporting works.
 
 Review compiled binary size and dependencies — ensure alien remains lightweight for OS bundling.

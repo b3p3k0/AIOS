@@ -1,19 +1,17 @@
-// Quadratic: x^2 - 3x - 10 = 0
-A = 1;
-B = -3;
-C = -10;
-D = (B * B) - (4 * A * C);
-print(D); // discriminant
+write("Quadratic helper: x^2 - 3x - 10 = 0");
+coeffA = 1;
+coeffB = -3;
+coeffC = -10;
+discriminant = (coeffB * coeffB) - (4 * coeffA * coeffC);
+write("Discriminant = ", discriminant);
 
-// Newton iterations to approximate sqrt(D)
-E = D / 2;
-F = 0;
-while (F < 6) {
-    E = 0.5 * (E + (D / E));
-    F = F + 1;
+approx = discriminant / 2;
+iterations = 0;
+while (iterations < 6) {
+    approx = 0.5 * (approx + (discriminant / approx));
+    iterations = iterations + 1;
 }
 
-G = (-B + E) / (2 * A);
-H = (-B - E) / (2 * A);
-print(G);
-print(H);
+rootPositive = (-coeffB + approx) / (2 * coeffA);
+rootNegative = (-coeffB - approx) / (2 * coeffA);
+write("Roots: ", rootPositive, " and ", rootNegative);

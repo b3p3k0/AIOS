@@ -8,16 +8,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define VAR_COUNT 26
-#define INPUT_PROMPT "... "
+#define READ_PROMPT "... "
 #define ZERO_EPS 1e-12
 
 typedef enum {
     TK_EOF = 0,
     TK_NUMBER,
     TK_IDENT,
-    TK_PRINT,
-    TK_INPUT,
+    TK_STRING,
+    TK_WRITE,
+    TK_READ,
     TK_IF,
     TK_WHILE,
     TK_PLUS,
@@ -30,6 +30,7 @@ typedef enum {
     TK_LBRACE,
     TK_RBRACE,
     TK_SEMI,
+    TK_COMMA,
     TK_LT,
     TK_GT,
     TK_LE,
@@ -41,17 +42,18 @@ typedef enum {
 typedef struct {
     TokenType type;
     double number;
-    char ident;
+    char *lexeme; /* identifier or string literal */
     int line;
 } Token;
 
 typedef enum {
     AST_NUMBER,
     AST_VAR,
+    AST_STRING,
     AST_BINOP,
     AST_ASSIGN,
-    AST_PRINT,
-    AST_INPUT,
+    AST_WRITE,
+    AST_READ,
     AST_IF,
     AST_WHILE,
     AST_BLOCK
@@ -63,22 +65,44 @@ struct AST {
     ASTType type;
     int line;
     double number;
-    char var_name;
-    TokenType op; /* for binary expressions */
+    char *name;            /* identifiers for VAR/ASSIGN/READ */
+    char *string_literal;  /* for AST_STRING */
+    TokenType op;          /* for AST_BINOP */
     AST *left;
     AST *right;
     AST **stmts;
     size_t stmt_count;
     size_t stmt_cap;
+    AST **args;
+    size_t arg_count;
+    size_t arg_cap;
+};
+
+typedef enum {
+    VAL_NUMBER,
+    VAL_STRING
+} ValueType;
+
+typedef struct {
+    ValueType type;
+    double number;
+    char *string;
+} Value;
+
+typedef struct Var Var;
+
+struct Var {
+    char *name;
+    Value value;
+    Var *next;
 };
 
 static const char *source = NULL;
 static size_t source_len = 0;
 static size_t source_pos = 0;
 static int current_line = 1;
-static Token current_token;
-
-static double variables[VAR_COUNT];
+static Token current_token = {0};
+static Var *var_list = NULL;
 
 static void fail(int line, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)))
@@ -95,6 +119,16 @@ static void fail(int line, const char *fmt, ...)
     exit(EXIT_FAILURE);
 }
 
+static void *xmalloc(size_t size)
+{
+    void *ptr = malloc(size);
+    if (!ptr) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+    return ptr;
+}
+
 static void *xrealloc(void *ptr, size_t size)
 {
     void *res = realloc(ptr, size);
@@ -103,6 +137,25 @@ static void *xrealloc(void *ptr, size_t size)
         exit(EXIT_FAILURE);
     }
     return res;
+}
+
+static char *xstrdup(const char *src)
+{
+    if (!src) {
+        return NULL;
+    }
+    size_t len = strlen(src) + 1;
+    char *copy = xmalloc(len);
+    memcpy(copy, src, len);
+    return copy;
+}
+
+static void free_token(Token *tok)
+{
+    if (tok->lexeme) {
+        free(tok->lexeme);
+        tok->lexeme = NULL;
+    }
 }
 
 static void skip_whitespace(void)
@@ -125,8 +178,73 @@ static void skip_whitespace(void)
     }
 }
 
+static bool ident_equals(const char *text, const char *keyword)
+{
+    for (; *text && *keyword; ++text, ++keyword) {
+        if ((char)tolower((unsigned char)*text) != *keyword) {
+            return false;
+        }
+    }
+    return *text == '\0' && *keyword == '\0';
+}
+
+static char decode_escape(char esc, int line)
+{
+    switch (esc) {
+    case 'n':
+        return '\n';
+    case 't':
+        return '\t';
+    case '\\':
+        return '\\';
+    case '"':
+        return '"';
+    default:
+        fail(line, "Unknown escape sequence \\%c", esc);
+    }
+}
+
+static char *parse_string_literal(void)
+{
+    int line = current_line;
+    size_t cap = 16;
+    size_t len = 0;
+    char *buffer = xmalloc(cap);
+    source_pos++; /* skip opening quote */
+    while (source_pos < source_len) {
+        char c = source[source_pos++];
+        if (c == '"') {
+            buffer[len] = '\0';
+            return buffer;
+        }
+        if (c == '\\') {
+            if (source_pos >= source_len) {
+                fail(line, "Unfinished escape in string literal");
+            }
+            c = decode_escape(source[source_pos++], line);
+        } else if (c == '\n') {
+            fail(line, "Newline in string literal");
+        }
+        if (len + 1 >= cap) {
+            cap *= 2;
+            buffer = xrealloc(buffer, cap);
+        }
+        buffer[len++] = c;
+    }
+    fail(line, "Unterminated string literal");
+}
+
+static char *copy_range(size_t start, size_t len)
+{
+    char *text = xmalloc(len + 1);
+    memcpy(text, source + start, len);
+    text[len] = '\0';
+    return text;
+}
+
 static void next_token(void)
 {
+    free_token(&current_token);
     skip_whitespace();
     current_token.line = current_line;
 
@@ -152,48 +270,50 @@ static void next_token(void)
         return;
     }
 
-    if (isalpha((unsigned char)c)) {
+    if (c == '"') {
+        current_token.type = TK_STRING;
+        current_token.lexeme = parse_string_literal();
+        return;
+    }
+
+    if (isalpha((unsigned char)c) || c == '_') {
         size_t start = source_pos;
-        while (source_pos < source_len && isalpha((unsigned char)source[source_pos])) {
-            source_pos++;
-        }
-        size_t len = source_pos - start;
-        if (len >= 32) {
-            fail(current_line, "Identifier too long");
-        }
-        char buf[32];
-        for (size_t i = 0; i < len; ++i) {
-            buf[i] = (char)tolower((unsigned char)source[start + i]);
-        }
-        buf[len] = '\0';
-
-        if (strcmp(buf, "print") == 0) {
-            current_token.type = TK_PRINT;
-            return;
-        }
-        if (strcmp(buf, "input") == 0) {
-            current_token.type = TK_INPUT;
-            return;
-        }
-        if (strcmp(buf, "if") == 0) {
-            current_token.type = TK_IF;
-            return;
-        }
-        if (strcmp(buf, "while") == 0) {
-            current_token.type = TK_WHILE;
-            return;
-        }
-
-        if (len == 1) {
-            char letter = (char)toupper((unsigned char)source[start]);
-            if (letter >= 'A' && letter <= 'Z') {
-                current_token.type = TK_IDENT;
-                current_token.ident = letter;
-                return;
+        source_pos++;
+        while (source_pos < source_len) {
+            char ch = source[source_pos];
+            if (isalnum((unsigned char)ch) || ch == '_') {
+                source_pos++;
+            } else {
+                break;
             }
         }
+        size_t len = source_pos - start;
+        char *text = copy_range(start, len);
 
-        fail(current_line, "Invalid identifier. Use single letters A..Z.");
+        if (ident_equals(text, "write")) {
+            current_token.type = TK_WRITE;
+            free(text);
+            return;
+        }
+        if (ident_equals(text, "read")) {
+            current_token.type = TK_READ;
+            free(text);
+            return;
+        }
+        if (ident_equals(text, "if")) {
+            current_token.type = TK_IF;
+            free(text);
+            return;
+        }
+        if (ident_equals(text, "while")) {
+            current_token.type = TK_WHILE;
+            free(text);
+            return;
+        }
+
+        current_token.type = TK_IDENT;
+        current_token.lexeme = text;
+        return;
     }
 
     source_pos++;
@@ -232,6 +352,9 @@ static void next_token(void)
         return;
     case ';':
         current_token.type = TK_SEMI;
+        return;
+    case ',':
+        current_token.type = TK_COMMA;
         return;
     case '<':
         if (source_pos < source_len && source[source_pos] == '=') {
@@ -294,6 +417,19 @@ static void block_append(AST *block, AST *stmt)
     block->stmts[block->stmt_count++] = stmt;
 }
 
+static void write_append(AST *node, AST *arg)
+{
+    if (!node || node->type != AST_WRITE) {
+        return;
+    }
+    if (node->arg_count == node->arg_cap) {
+        size_t new_cap = node->arg_cap ? node->arg_cap * 2 : 4;
+        node->args = xrealloc(node->args, new_cap * sizeof(AST *));
+        node->arg_cap = new_cap;
+    }
+    node->args[node->arg_count++] = arg;
+}
+
 static AST *parse_expression(void);
 
 static AST *parse_primary(void)
@@ -304,9 +440,15 @@ static AST *parse_primary(void)
         next_token();
         return node;
     }
+    if (current_token.type == TK_STRING) {
+        AST *node = new_ast(AST_STRING, current_token.line);
+        node->string_literal = xstrdup(current_token.lexeme);
+        next_token();
+        return node;
+    }
     if (current_token.type == TK_IDENT) {
         AST *node = new_ast(AST_VAR, current_token.line);
-        node->var_name = current_token.ident;
+        node->name = xstrdup(current_token.lexeme);
         next_token();
         return node;
     }
@@ -316,8 +458,7 @@ static AST *parse_primary(void)
         consume(TK_RPAREN, "Expected ')' after expression");
         return expr;
     }
-    fail(current_token.line, "Expected number, variable, or '('");
-    return NULL;
+    fail(current_token.line, "Expected number, string, variable, or '('");
 }
 
 static AST *make_unary(TokenType op, AST *operand, int line)
@@ -422,33 +563,42 @@ static AST *parse_expression(void)
 static AST *parse_block(void);
 static AST *parse_statement(void);
 
-static AST *parse_print_statement(void)
+static AST *parse_write_statement(void)
 {
     int line = current_token.line;
     next_token();
-    consume(TK_LPAREN, "Expected '(' after print");
-    AST *expr = parse_expression();
-    consume(TK_RPAREN, "Expected ')' after print expression");
-    consume(TK_SEMI, "Missing ';' after print");
-    AST *node = new_ast(AST_PRINT, line);
-    node->left = expr;
+    consume(TK_LPAREN, "Expected '(' after write");
+    AST *node = new_ast(AST_WRITE, line);
+    if (current_token.type != TK_RPAREN) {
+        while (1) {
+            AST *expr = parse_expression();
+            write_append(node, expr);
+            if (current_token.type == TK_COMMA) {
+                next_token();
+                continue;
+            }
+            break;
+        }
+    }
+    consume(TK_RPAREN, "Expected ')' after write arguments");
+    consume(TK_SEMI, "Missing ';' after write");
     return node;
 }
 
-static AST *parse_input_statement(void)
+static AST *parse_read_statement(void)
 {
     int line = current_token.line;
     next_token();
-    consume(TK_LPAREN, "Expected '(' after input");
+    consume(TK_LPAREN, "Expected '(' after read");
     if (current_token.type != TK_IDENT) {
-        fail(current_token.line, "input() expects a single-letter variable");
+        fail(current_token.line, "read() expects an identifier");
     }
-    char var_name = current_token.ident;
+    char *name = xstrdup(current_token.lexeme);
     next_token();
-    consume(TK_RPAREN, "Expected ')' after input variable");
-    consume(TK_SEMI, "Missing ';' after input");
-    AST *node = new_ast(AST_INPUT, line);
-    node->var_name = var_name;
+    consume(TK_RPAREN, "Expected ')' after read variable");
+    consume(TK_SEMI, "Missing ';' after read");
+    AST *node = new_ast(AST_READ, line);
+    node->name = name;
     return node;
 }
 
@@ -457,14 +607,14 @@ static AST *parse_assignment(void)
     if (current_token.type != TK_IDENT) {
         fail(current_token.line, "Expected variable name");
     }
-    char var_name = current_token.ident;
+    char *name = xstrdup(current_token.lexeme);
     int line = current_token.line;
     next_token();
     consume(TK_EQUALS, "Expected '=' in assignment");
     AST *expr = parse_expression();
     consume(TK_SEMI, "Missing ';' after assignment");
     AST *node = new_ast(AST_ASSIGN, line);
-    node->var_name = var_name;
+    node->name = name;
     node->left = expr;
     return node;
 }
@@ -522,10 +672,10 @@ static AST *parse_block(void)
 static AST *parse_statement(void)
 {
     switch (current_token.type) {
-    case TK_PRINT:
-        return parse_print_statement();
-    case TK_INPUT:
-        return parse_input_statement();
+    case TK_WRITE:
+        return parse_write_statement();
+    case TK_READ:
+        return parse_read_statement();
     case TK_IF:
         return parse_if_statement();
     case TK_WHILE:
@@ -549,20 +699,55 @@ static AST *parse_program(void)
     return root;
 }
 
-static int var_index(char name, int line)
+static Value value_number(double number)
 {
-    if (name < 'A' || name > 'Z') {
-        fail(line, "Invalid variable '%c'", name);
-    }
-    return name - 'A';
+    Value v;
+    v.type = VAL_NUMBER;
+    v.number = number;
+    v.string = NULL;
+    return v;
 }
 
-static bool is_truthy(double value)
+static Value value_string_copy(const char *text)
 {
-    if (isnan(value)) {
-        return false;
+    Value v;
+    v.type = VAL_STRING;
+    v.number = 0.0;
+    v.string = xstrdup(text ? text : "");
+    return v;
+}
+
+static Value value_string_owned(char *text)
+{
+    Value v;
+    v.type = VAL_STRING;
+    v.number = 0.0;
+    v.string = text ? text : xstrdup("");
+    return v;
+}
+
+static void value_free(Value *v)
+{
+    if (!v) {
+        return;
     }
-    return value != 0.0;
+    if (v->type == VAL_STRING && v->string) {
+        free(v->string);
+        v->string = NULL;
+    }
+    v->type = VAL_NUMBER;
+    v->number = 0.0;
+}
+
+static Value value_clone(const Value *src)
+{
+    if (!src) {
+        return value_number(0.0);
+    }
+    if (src->type == VAL_STRING) {
+        return value_string_copy(src->string);
+    }
+    return value_number(src->number);
 }
 
 static double truncate_to_thousandths(double value)
@@ -571,75 +756,229 @@ static double truncate_to_thousandths(double value)
     return scaled / 1000.0;
 }
 
+static char *format_number(double value)
+{
+    double truncated = truncate_to_thousandths(value);
+    char buffer[64];
+    int written = snprintf(buffer, sizeof(buffer), "%.3f", truncated);
+    if (written < 0) {
+        fail(0, "Failed to format number");
+    }
+    char *out = xmalloc((size_t)written + 1);
+    memcpy(out, buffer, (size_t)written + 1);
+    return out;
+}
+
+static double value_expect_number(const Value *v, int line)
+{
+    if (!v || v->type != VAL_NUMBER) {
+        fail(line, "Expected numeric value");
+    }
+    return v->number;
+}
+
+static bool value_is_truthy(const Value *v, int line)
+{
+    double number = value_expect_number(v, line);
+    if (isnan(number)) {
+        return false;
+    }
+    return number != 0.0;
+}
+
+static char *value_to_cstring(const Value *v)
+{
+    if (!v) {
+        return xstrdup("");
+    }
+    if (v->type == VAL_STRING) {
+        return xstrdup(v->string ? v->string : "");
+    }
+    return format_number(v->number);
+}
+
+static Var *find_variable(const char *name)
+{
+    for (Var *v = var_list; v; v = v->next) {
+        if (strcmp(v->name, name) == 0) {
+            return v;
+        }
+    }
+    return NULL;
+}
+
+static Var *ensure_variable(const char *name)
+{
+    Var *var = find_variable(name);
+    if (var) {
+        return var;
+    }
+    var = xmalloc(sizeof(Var));
+    var->name = xstrdup(name);
+    var->value = value_number(0.0);
+    var->next = var_list;
+    var_list = var;
+    return var;
+}
+
+static Value variable_read(const char *name)
+{
+    Var *var = ensure_variable(name);
+    return value_clone(&var->value);
+}
+
+static void variable_write(const char *name, const Value *value)
+{
+    Var *var = ensure_variable(name);
+    value_free(&var->value);
+    var->value = value_clone(value);
+}
+
 static double read_number_from_stdin(int line)
 {
     char buffer[256];
     if (!fgets(buffer, sizeof(buffer), stdin)) {
-        fail(line, "input() failed to read data");
+        fail(line, "read() failed to read data");
     }
     char *end = NULL;
     errno = 0;
     double value = strtod(buffer, &end);
     if (errno == ERANGE) {
-        fail(line, "input() value out of range");
+        fail(line, "read() value out of range");
     }
     if (end == buffer) {
-        fail(line, "input() expects numeric text");
+        fail(line, "read() expects numeric text");
     }
     while (end && *end && isspace((unsigned char)*end)) {
         end++;
     }
     if (end && *end != '\0') {
-        fail(line, "input() expects numeric text");
+        fail(line, "read() expects numeric text");
     }
     return value;
 }
 
-static double eval_expr(AST *node);
+static Value eval_expr(AST *node);
 
-static double eval_binop(AST *node, double lhs, double rhs)
+static Value eval_binop(AST *node, Value left, Value right)
 {
     switch (node->op) {
     case TK_PLUS:
-        return lhs + rhs;
+        if (left.type == VAL_STRING || right.type == VAL_STRING) {
+            char *ls = value_to_cstring(&left);
+            char *rs = value_to_cstring(&right);
+            size_t lhs_len = strlen(ls);
+            size_t rhs_len = strlen(rs);
+            char *joined = xmalloc(lhs_len + rhs_len + 1);
+            memcpy(joined, ls, lhs_len);
+            memcpy(joined + lhs_len, rs, rhs_len + 1);
+            free(ls);
+            free(rs);
+            return value_string_owned(joined);
+        }
+        return value_number(value_expect_number(&left, node->line) +
+                             value_expect_number(&right, node->line));
     case TK_MINUS:
-        return lhs - rhs;
+        return value_number(value_expect_number(&left, node->line) -
+                             value_expect_number(&right, node->line));
     case TK_STAR:
-        return lhs * rhs;
-    case TK_SLASH:
-        if (fabs(rhs) < ZERO_EPS) {
+        return value_number(value_expect_number(&left, node->line) *
+                             value_expect_number(&right, node->line));
+    case TK_SLASH: {
+        double divisor = value_expect_number(&right, node->line);
+        if (fabs(divisor) < ZERO_EPS) {
             fail(node->line, "Gravity called: divide-by-zero is forbidden");
         }
-        return lhs / rhs;
+        return value_number(value_expect_number(&left, node->line) / divisor);
+    }
     case TK_LT:
-        return lhs < rhs ? 1.0 : 0.0;
-    case TK_GT:
-        return lhs > rhs ? 1.0 : 0.0;
     case TK_LE:
-        return lhs <= rhs ? 1.0 : 0.0;
-    case TK_GE:
-        return lhs >= rhs ? 1.0 : 0.0;
+    case TK_GT:
+    case TK_GE: {
+        if (left.type == VAL_STRING && right.type == VAL_STRING) {
+            int cmp = strcmp(left.string ? left.string : "", right.string ? right.string : "");
+            bool result = false;
+            switch (node->op) {
+            case TK_LT:
+                result = cmp < 0;
+                break;
+            case TK_LE:
+                result = cmp <= 0;
+                break;
+            case TK_GT:
+                result = cmp > 0;
+                break;
+            case TK_GE:
+                result = cmp >= 0;
+                break;
+            default:
+                break;
+            }
+            return value_number(result ? 1.0 : 0.0);
+        }
+        double a = value_expect_number(&left, node->line);
+        double b = value_expect_number(&right, node->line);
+        bool result = false;
+        switch (node->op) {
+        case TK_LT:
+            result = a < b;
+            break;
+        case TK_LE:
+            result = a <= b;
+            break;
+        case TK_GT:
+            result = a > b;
+            break;
+        case TK_GE:
+            result = a >= b;
+            break;
+        default:
+            break;
+        }
+        return value_number(result ? 1.0 : 0.0);
+    }
     case TK_EQEQ:
-        return lhs == rhs ? 1.0 : 0.0;
-    case TK_NEQ:
-        return lhs != rhs ? 1.0 : 0.0;
+    case TK_NEQ: {
+        bool equal = false;
+        if (left.type == VAL_STRING && right.type == VAL_STRING) {
+            const char *ls = left.string ? left.string : "";
+            const char *rs = right.string ? right.string : "";
+            equal = (strcmp(ls, rs) == 0);
+        } else if (left.type == VAL_NUMBER && right.type == VAL_NUMBER) {
+            double a = value_expect_number(&left, node->line);
+            double b = value_expect_number(&right, node->line);
+            equal = (a == b);
+        } else {
+            fail(node->line, "Cannot compare strings and numbers");
+        }
+        bool result = (node->op == TK_EQEQ) ? equal : !equal;
+        return value_number(result ? 1.0 : 0.0);
+    }
     default:
         fail(node->line, "Invalid binary operator");
     }
 }
 
-static double eval_expr(AST *node)
+static Value eval_expr(AST *node)
 {
     if (!node) {
         fail(0, "Null expression node");
     }
     switch (node->type) {
     case AST_NUMBER:
-        return node->number;
+        return value_number(node->number);
+    case AST_STRING:
+        return value_string_copy(node->string_literal);
     case AST_VAR:
-        return variables[var_index(node->var_name, node->line)];
-    case AST_BINOP:
-        return eval_binop(node, eval_expr(node->left), eval_expr(node->right));
+        return variable_read(node->name);
+    case AST_BINOP: {
+        Value left = eval_expr(node->left);
+        Value right = eval_expr(node->right);
+        Value result = eval_binop(node, left, right);
+        value_free(&left);
+        value_free(&right);
+        return result;
+    }
     default:
         fail(node->line, "Unsupported expression");
     }
@@ -651,22 +990,31 @@ static void exec_stmt(AST *node)
         return;
     }
     switch (node->type) {
-    case AST_PRINT: {
-        double value = eval_expr(node->left);
-        double truncated = truncate_to_thousandths(value);
-        printf("%.3f\n", truncated);
+    case AST_WRITE:
+        for (size_t i = 0; i < node->arg_count; ++i) {
+            Value value = eval_expr(node->args[i]);
+            if (value.type == VAL_STRING) {
+                fputs(value.string ? value.string : "", stdout);
+            } else {
+                double truncated = truncate_to_thousandths(value.number);
+                printf("%.3f", truncated);
+            }
+            value_free(&value);
+        }
+        printf("\n");
         break;
-    }
-    case AST_INPUT: {
-        fputs(INPUT_PROMPT, stdout);
+    case AST_READ: {
+        fputs(READ_PROMPT, stdout);
         fflush(stdout);
-        double value = read_number_from_stdin(node->line);
-        variables[var_index(node->var_name, node->line)] = value;
+        double number = read_number_from_stdin(node->line);
+        Value v = value_number(number);
+        variable_write(node->name, &v);
         break;
     }
     case AST_ASSIGN: {
-        double value = eval_expr(node->left);
-        variables[var_index(node->var_name, node->line)] = value;
+        Value value = eval_expr(node->left);
+        variable_write(node->name, &value);
+        value_free(&value);
         break;
     }
     case AST_BLOCK:
@@ -674,13 +1022,22 @@ static void exec_stmt(AST *node)
             exec_stmt(node->stmts[i]);
         }
         break;
-    case AST_IF:
-        if (is_truthy(eval_expr(node->left))) {
+    case AST_IF: {
+        Value cond = eval_expr(node->left);
+        if (value_is_truthy(&cond, node->line)) {
             exec_stmt(node->right);
         }
+        value_free(&cond);
         break;
+    }
     case AST_WHILE:
-        while (is_truthy(eval_expr(node->left))) {
+        while (1) {
+            Value cond = eval_expr(node->left);
+            bool truthy = value_is_truthy(&cond, node->line);
+            value_free(&cond);
+            if (!truthy) {
+                break;
+            }
             exec_stmt(node->right);
         }
         break;
@@ -695,13 +1052,24 @@ static void free_ast(AST *node)
         return;
     }
     switch (node->type) {
-    case AST_PRINT:
+    case AST_WRITE:
+        for (size_t i = 0; i < node->arg_count; ++i) {
+            free_ast(node->args[i]);
+        }
+        free(node->args);
+        break;
     case AST_ASSIGN:
+        free(node->name);
         free_ast(node->left);
         break;
-    case AST_INPUT:
+    case AST_READ:
+        free(node->name);
+        break;
     case AST_VAR:
-    case AST_NUMBER:
+        free(node->name);
+        break;
+    case AST_STRING:
+        free(node->string_literal);
         break;
     case AST_BINOP:
         free_ast(node->left);
@@ -718,8 +1086,23 @@ static void free_ast(AST *node)
         }
         free(node->stmts);
         break;
+    case AST_NUMBER:
+        break;
     }
     free(node);
+}
+
+static void free_variables(void)
+{
+    Var *var = var_list;
+    while (var) {
+        Var *next = var->next;
+        free(var->name);
+        value_free(&var->value);
+        free(var);
+        var = next;
+    }
+    var_list = NULL;
 }
 
 static char *read_file(const char *path, size_t *out_size)
@@ -742,11 +1125,7 @@ static char *read_file(const char *path, size_t *out_size)
         perror("fseek");
         exit(EXIT_FAILURE);
     }
-    char *buffer = malloc((size_t)length + 1);
-    if (!buffer) {
-        perror("malloc");
-        exit(EXIT_FAILURE);
-    }
+    char *buffer = xmalloc((size_t)length + 1);
     size_t read_bytes = fread(buffer, 1, (size_t)length, fp);
     if (read_bytes != (size_t)length) {
         perror("fread");
@@ -773,13 +1152,15 @@ int main(int argc, char **argv)
     source_len = file_size;
     source_pos = 0;
     current_line = 1;
-    memset(variables, 0, sizeof(variables));
+    memset(&current_token, 0, sizeof(current_token));
 
     next_token();
     AST *program = parse_program();
     exec_stmt(program);
 
     free_ast(program);
+    free_token(&current_token);
     free(buffer);
+    free_variables();
     return EXIT_SUCCESS;
 }

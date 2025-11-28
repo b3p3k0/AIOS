@@ -1,5 +1,6 @@
-A = 1;
-while (A <= 10) {
-    print(A);
-    A = A + 1;
+counter = 1;
+limit = 10;
+while (counter <= limit) {
+    write("Counting ", counter);
+    counter = counter + 1;
 }
