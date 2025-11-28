@@ -265,7 +265,19 @@ void shell_run(struct shell_env *env) {
 
         if (strcmp(argv[0], "exit") == 0) break;
         if (strcmp(argv[0], "help") == 0) {
-            print("Commands: list, make-dir, delete, read, write, goin, pwd, format, format-disk [seed], sysinfo <target>, help, exit\r\n");
+            print("Commands:\r\n");
+            print("  help                - show this list\r\n");
+            print("  exit                - leave the shell\r\n");
+            print("  sysinfo <ram|storage|display> - show system details\r\n");
+            print("  format-disk [seed]  - initialize the virtio disk (optionally from RAM seed)\r\n");
+            print("  format              - reformat the currently mounted backend\r\n");
+            print("  pwd                 - print current directory\r\n");
+            print("  list [path]         - list directory contents\r\n");
+            print("  make-dir <name>     - create a directory\r\n");
+            print("  delete <name>       - remove a file or directory\r\n");
+            print("  read <file>         - display a file\r\n");
+            print("  write <file>        - edit/create a file (end input with '.')\r\n");
+            print("  goin <path>         - change directory\r\n");
             continue;
         }
         if (strcmp(argv[0], "sysinfo") == 0) {
