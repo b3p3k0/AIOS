@@ -212,6 +212,7 @@ create_image() {
     mcopy -i "$IMAGE_PATH" "$KERNEL_ELF" ::/AIOS/KERNEL.ELF
 
     local startup_nsh="$ESP_STAGING/startup.nsh"
+    mkdir -p "$(dirname "$startup_nsh")"
     cat >"$startup_nsh" <<'EOF'
 @echo -off
 fs0:\EFI\BOOT\BOOTX64.EFI
