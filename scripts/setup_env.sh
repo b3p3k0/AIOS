@@ -211,6 +211,13 @@ create_image() {
     mcopy -i "$IMAGE_PATH" "$EFI_BINARY" ::/EFI/BOOT/BOOTX64.EFI
     mcopy -i "$IMAGE_PATH" "$KERNEL_ELF" ::/AIOS/KERNEL.ELF
 
+    local startup_nsh="$ESP_STAGING/startup.nsh"
+    cat >"$startup_nsh" <<'EOF'
+@echo -off
+fs0:\EFI\BOOT\BOOTX64.EFI
+EOF
+    mcopy -i "$IMAGE_PATH" "$startup_nsh" ::/startup.nsh
+
     if [[ ! -f "$DATA_IMAGE" ]]; then
         log "Creating virtio data disk at $DATA_IMAGE"
         truncate -s "$DATA_IMAGE_SIZE" "$DATA_IMAGE"
