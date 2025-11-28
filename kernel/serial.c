@@ -14,6 +14,7 @@ static inline uint8_t inb(uint16_t port) {
 
 static void serial_wait(void) {
     while ((inb(COM1_PORT + 5) & 0x20) == 0) {
+        __asm__ __volatile__("pause");
     }
 }
 
@@ -44,7 +45,7 @@ void serial_write(const char *str) {
 
 int serial_getc(void) {
     while (!serial_ready()) {
-        /* spin */
+        __asm__ __volatile__("pause");
     }
     return inb(COM1_PORT);
 }

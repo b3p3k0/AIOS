@@ -133,6 +133,7 @@ void kernel_entry(struct aios_boot_info *boot) {
         .storage = &storage,
         .boot = boot
     };
+    serial_write("[kernel] Launching serial FS shell. Use the make-run terminal for input.\r\n");
     shell_run(&env);
 
 halt:
