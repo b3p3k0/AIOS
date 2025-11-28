@@ -1,0 +1,19 @@
+// ASCII codes for "WELCOME TO ALIEN" so scripts stay numeric-only
+print(87);
+print(69);
+print(76);
+print(67);
+print(79);
+print(77);
+print(69);
+print(84);
+print(79);
+print(65);
+print(76);
+print(73);
+print(69);
+print(78);
+
+print(42 + 1);
+input(A);
+print(A * 1.500);
